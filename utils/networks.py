@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -29,7 +30,8 @@ class MLPNetwork(nn.Module):
         if constrain_out and not discrete_action:
             # initialize small to prevent saturation
             self.fc3.weight.data.uniform_(-3e-3, 3e-3)
-            self.out_fn = F.tanh
+            # self.out_fn = F.tanh
+            self.out_fn = torch.tanh
         else:  # logits for discrete action (will softmax later)
             self.out_fn = lambda x: x
 
@@ -43,4 +45,5 @@ class MLPNetwork(nn.Module):
         h1 = self.nonlin(self.fc1(self.in_fn(X)))
         h2 = self.nonlin(self.fc2(h1))
         out = self.out_fn(self.fc3(h2))
+        # print('forward out', out)
         return out

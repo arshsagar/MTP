@@ -85,7 +85,7 @@ class SubprocVecEnv(VecEnv):
         if self.closed:
             return
         if self.waiting:
-            for remote in self.remotes:            
+            for remote in self.remotes:
                 remote.recv()
         for remote in self.remotes:
             remote.send(('close', None))
@@ -96,32 +96,38 @@ class SubprocVecEnv(VecEnv):
 
 class DummyVecEnv(VecEnv):
     def __init__(self, env_fns):
+        print('DummyVecEnv init')
         self.envs = [fn() for fn in env_fns]
-        env = self.envs[0]        
+        env = self.envs[0]
         VecEnv.__init__(self, len(env_fns), env.observation_space, env.action_space)
         if all([hasattr(a, 'adversary') for a in env.agents]):
             self.agent_types = ['adversary' if a.adversary else 'agent' for a in
                                 env.agents]
         else:
             self.agent_types = ['agent' for _ in env.agents]
-        self.ts = np.zeros(len(self.envs), dtype='int')        
+        self.ts = np.zeros(len(self.envs), dtype='int')
+        # print('ts',self.ts)
         self.actions = None
 
     def step_async(self, actions):
+        # print('step_async')
         self.actions = actions
 
     def step_wait(self):
+        # print('step_wait')
         results = [env.step(a) for (a,env) in zip(self.actions, self.envs)]
-        obs, rews, dones, infos = map(np.array, zip(*results))
+        # print('results', results)
+        obs, rews, dones, infos, ac, wc = map(np.array, zip(*results))
         self.ts += 1
         for (i, done) in enumerate(dones):
-            if all(done): 
+            if all(done):
+                print("!!")
                 obs[i] = self.envs[i].reset()
                 self.ts[i] = 0
         self.actions = None
-        return np.array(obs), np.array(rews), np.array(dones), infos
+        return np.array(obs), np.array(rews), np.array(dones), infos, ac, wc
 
-    def reset(self):        
+    def reset(self):
         results = [env.reset() for env in self.envs]
         return np.array(results)
 

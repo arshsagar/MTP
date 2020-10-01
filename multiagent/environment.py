@@ -39,11 +39,15 @@ class MultiAgentEnv(gym.Env):
         # configure spaces
         self.action_space = []
         self.observation_space = []
+        #########################
         for agent in self.agents:
+            ####################################################################
             total_action_space = []
             # physical action space
             if self.discrete_action_space:
+                print('true')
                 u_action_space = spaces.Discrete(world.dim_p * 2 + 1)
+                # print('u_action_space', u_action_space)
             else:
                 u_action_space = spaces.Box(low=-agent.u_range, high=+agent.u_range, shape=(world.dim_p,))
             if agent.movable:
@@ -54,6 +58,7 @@ class MultiAgentEnv(gym.Env):
                 total_action_space.append(c_action_space)
             # total action space
             if len(total_action_space) > 1:
+                print('total_action_space > 1')
                 # all action spaces are discrete, so simplify to MultiDiscrete action space
                 if all([isinstance(act_space, spaces.Discrete) for act_space in total_action_space]):
                     act_space = spaces.MultiDiscrete([[0,act_space.n-1] for act_space in total_action_space])
@@ -61,12 +66,16 @@ class MultiAgentEnv(gym.Env):
                     act_space = spaces.Tuple(total_action_space)
                 self.action_space.append(act_space)
             else:
+                # print('total_action_space', total_action_space)
                 self.action_space.append(total_action_space[0])
             # observation space
+            # print('init observation_callback called')
             obs_dim = len(observation_callback(agent, self.world))
             self.observation_space.append(spaces.Box(low=-np.inf, high=+np.inf, shape=(obs_dim,)))
             agent.action.c = np.zeros(self.world.dim_c)
-
+            ####################################################################
+        # print('action_space', self.action_space)
+        # print('observation_space', self.observation_space)
         # rendering
         self.shared_viewer = shared_viewer
         if self.shared_viewer:
@@ -80,10 +89,14 @@ class MultiAgentEnv(gym.Env):
             np.random.seed(1)
         else:
             np.random.seed(seed)
-
+################################################################################
     def _step(self, action_n):
+        # print('env.step taken')
+        # print('action_n', action_n)
         obs_n = []
         reward_n = []
+        ac_n = []
+        wc_n = []
         done_n = []
         info_n = {'n': []}
         self.agents = self.world.policy_agents
@@ -91,25 +104,35 @@ class MultiAgentEnv(gym.Env):
         for i, agent in enumerate(self.agents):
             self._set_action(action_n[i], agent, self.action_space[i])
         # advance world state
+        # print('world.step()')
         self.world.step()
+        # print('world.step()')
         # record observation for each agent
         for agent in self.agents:
             obs_n.append(self._get_obs(agent))
-            reward_n.append(self._get_reward(agent))
+            # print('agent rewrd :\n', self._get_reward(agent))
+            main_reward, agentCollisions, wallCollisions = self._get_reward(agent)
+            reward_n.append(main_reward)
+            ac_n.append(agentCollisions)
+            wc_n.append(wallCollisions)
             done_n.append(self._get_done(agent))
 
             info_n['n'].append(self._get_info(agent))
 
         # all agents get total reward in cooperative case
         reward = np.sum(reward_n)
+        ac = np.sum(ac_n)
+        wc = np.sum(wc_n)
         if self.shared_reward:
             reward_n = [reward] * self.n
         if self.post_step_callback is not None:
             self.post_step_callback(self.world)
-        return obs_n, reward_n, done_n, info_n
-
+        return obs_n, reward_n, done_n, info_n, ac, wc
+    ################
+    ################
     def _reset(self):
         # reset world
+        # print('reset_callback')
         self.reset_callback(self.world)
         # reset renderer
         self._reset_render()
@@ -118,8 +141,9 @@ class MultiAgentEnv(gym.Env):
         self.agents = self.world.policy_agents
         for agent in self.agents:
             obs_n.append(self._get_obs(agent))
+        # print(obs_n)
         return obs_n
-
+################################################################################
     # get info used for benchmarking
     def _get_info(self, agent):
         if self.info_callback is None:
@@ -130,7 +154,9 @@ class MultiAgentEnv(gym.Env):
     def _get_obs(self, agent):
         if self.observation_callback is None:
             return np.zeros(0)
-        return self.observation_callback(agent, self.world)
+        obs_c = self.observation_callback(agent, self.world)
+        # print('obs_c', len(obs_c))
+        return obs_c
 
     # get dones for a particular agent
     # unused right now -- agents are allowed to go beyond the viewing screen
@@ -143,7 +169,9 @@ class MultiAgentEnv(gym.Env):
     def _get_reward(self, agent):
         if self.reward_callback is None:
             return 0.0
-        return self.reward_callback(agent, self.world)
+        # print('_get_reward')
+        main_reward, agentCollisions, wallCollisions = self.reward_callback(agent, self.world)
+        return main_reward, agentCollisions, wallCollisions
 
     # set env action for a particular agent
     def _set_action(self, action, agent, action_space, time=None):
@@ -151,6 +179,7 @@ class MultiAgentEnv(gym.Env):
         agent.action.c = np.zeros(self.world.dim_c)
         # process action
         if isinstance(action_space, spaces.MultiDiscrete):
+            print('action_space is MultiDiscrete')
             act = []
             size = action_space.high - action_space.low + 1
             index = 0
@@ -160,10 +189,12 @@ class MultiAgentEnv(gym.Env):
             action = act
         else:
             action = [action]
+            # print('action ', action)
 
         if agent.movable:
             # physical action
             if self.discrete_action_input:
+                print('discrete_action_input')
                 agent.action.u = np.zeros(self.world.dim_p)
                 # process discrete action
                 if action[0] == 1: agent.action.u[0] = -1.0
@@ -172,20 +203,27 @@ class MultiAgentEnv(gym.Env):
                 if action[0] == 4: agent.action.u[1] = +1.0
             else:
                 if self.force_discrete_action:
+                    print('force_discrete_action')
                     d = np.argmax(action[0])
                     action[0][:] = 0.0
                     action[0][d] = 1.0
                 if self.discrete_action_space:
+                    # print('discrete_action_space')
                     agent.action.u[0] += action[0][1] - action[0][2]
                     agent.action.u[1] += action[0][3] - action[0][4]
+                    # print('agent.action.u :\n', agent.action.u)
                 else:
+                    # print('non_discrete_action_space')
                     agent.action.u = action[0]
             sensitivity = 5.0
             if agent.accel is not None:
+                # print('accel is not None')
                 sensitivity = agent.accel
             agent.action.u *= sensitivity
             action = action[1:]
         if not agent.silent:
+            # print('agent is not silent')
+            # print(action)
             # communication action
             if self.discrete_action_input:
                 agent.action.c = np.zeros(self.world.dim_c)
@@ -193,6 +231,7 @@ class MultiAgentEnv(gym.Env):
             else:
                 agent.action.c = action[0]
             action = action[1:]
+            # print(action)
         # make sure we used all elements of action
         assert len(action) == 0
 
@@ -231,7 +270,7 @@ class MultiAgentEnv(gym.Env):
                 # import rendering only if we need it (and don't import for headless machines)
                 #from gym.envs.classic_control import rendering
                 from multiagent import rendering
-                self.viewers[i] = rendering.Viewer(400,400)
+                self.viewers[i] = rendering.Viewer(500,500)
 
         # create rendering geometry
         if self.render_geoms is None:
@@ -242,37 +281,49 @@ class MultiAgentEnv(gym.Env):
             self.render_geoms_xform = []
             self.comm_geoms = []
             for entity in self.world.entities:
-                geom = rendering.make_circle(entity.size)
-                xform = rendering.Transform()
-                entity_comm_geoms = []
-                if 'agent' in entity.name:
-                    geom.set_color(*entity.color, alpha=0.5)
-                    if not entity.silent:
-                        dim_c = self.world.dim_c
-                        # make circles to represent communication
-                        for ci in range(dim_c):
-                            comm = rendering.make_circle(entity.size / dim_c)
-                            comm.set_color(1, 1, 1)
-                            comm.add_attr(xform)
-                            offset = rendering.Transform()
-                            comm_size = (entity.size / dim_c)
-                            offset.set_translation(ci * comm_size * 2 -
-                                                   entity.size + comm_size, 0)
-                            comm.add_attr(offset)
-                            entity_comm_geoms.append(comm)
-                else:
+                if 'obstacle' in entity.name:
+                    corners = ((entity.state.p_pos[0]-(entity.size/np.sqrt(2)), entity.state.p_pos[1]-(entity.size/np.sqrt(2))),
+                               (entity.state.p_pos[0]+(entity.size/np.sqrt(2)), entity.state.p_pos[1]-(entity.size/np.sqrt(2))),
+                               (entity.state.p_pos[0]+(entity.size/np.sqrt(2)), entity.state.p_pos[1]+(entity.size/np.sqrt(2))),
+                               (entity.state.p_pos[0]-(entity.size/np.sqrt(2)), entity.state.p_pos[1]+(entity.size/np.sqrt(2))))
+                    corners = tuple(c[::-1] for c in corners)
+                    geom = rendering.make_polygon(corners)
                     geom.set_color(*entity.color)
-                geom.add_attr(xform)
-                self.render_geoms.append(geom)
-                self.render_geoms_xform.append(xform)
-                self.comm_geoms.append(entity_comm_geoms)
+                    self.render_geoms.append(geom)
+                else:
+                    geom = rendering.make_circle(entity.size)
+                    xform = rendering.Transform()
+                    entity_comm_geoms = []
+                    if 'agent' in entity.name:
+                        geom.set_color(*entity.color, alpha=0.5)
+                        if not entity.silent:
+                            dim_c = self.world.dim_c
+                            # make circles to represent communication
+                            for ci in range(dim_c):
+                                comm = rendering.make_circle(entity.size / dim_c)
+                                comm.set_color(1, 1, 1)
+                                comm.add_attr(xform)
+                                offset = rendering.Transform()
+                                comm_size = (entity.size / dim_c)
+                                offset.set_translation(ci * comm_size * 2 -
+                                                       entity.size + comm_size, 0)
+                                comm.add_attr(offset)
+                                entity_comm_geoms.append(comm)
+                    else:
+                        geom.set_color(*entity.color)
+                    geom.add_attr(xform)
+                    self.render_geoms.append(geom)
+                    self.render_geoms_xform.append(xform)
+                    self.comm_geoms.append(entity_comm_geoms)
             for wall in self.world.walls:
                 corners = ((wall.axis_pos - 0.5 * wall.width, wall.endpoints[0]),
                            (wall.axis_pos - 0.5 * wall.width, wall.endpoints[1]),
                            (wall.axis_pos + 0.5 * wall.width, wall.endpoints[1]),
                            (wall.axis_pos + 0.5 * wall.width, wall.endpoints[0]))
+                # print(corners)
                 if wall.orient == 'H':
                     corners = tuple(c[::-1] for c in corners)
+
                 geom = rendering.make_polygon(corners)
                 if wall.hard:
                     geom.set_color(*wall.color)
@@ -301,15 +352,16 @@ class MultiAgentEnv(gym.Env):
             self.viewers[i].set_bounds(pos[0]-cam_range,pos[0]+cam_range,pos[1]-cam_range,pos[1]+cam_range)
             # update geometry positions
             for e, entity in enumerate(self.world.entities):
-                self.render_geoms_xform[e].set_translation(*entity.state.p_pos)
-                if 'agent' in entity.name:
-                    self.render_geoms[e].set_color(*entity.color, alpha=0.5)
-                    if not entity.silent:
-                        for ci in range(self.world.dim_c):
-                            color = 1 - entity.state.c[ci]
-                            self.comm_geoms[e][ci].set_color(color, color, color)
-                else:
-                    self.render_geoms[e].set_color(*entity.color)
+                if 'obstacle' not in entity.name:
+                    self.render_geoms_xform[e].set_translation(*entity.state.p_pos)
+                    if 'agent' in entity.name:
+                        self.render_geoms[e].set_color(*entity.color, alpha=0.5)
+                        if not entity.silent:
+                            for ci in range(self.world.dim_c):
+                                color = 1 - entity.state.c[ci]
+                                self.comm_geoms[e][ci].set_color(color, color, color)
+                    else:
+                        self.render_geoms[e].set_color(*entity.color)
             # render to display or array
             results.append(self.viewers[i].render(return_rgb_array = mode=='rgb_array'))
 
@@ -338,51 +390,51 @@ class MultiAgentEnv(gym.Env):
 
 # vectorized wrapper for a batch of multi-agent environments
 # assumes all environments have the same observation and action space
-class BatchMultiAgentEnv(gym.Env):
-    metadata = {
-        'runtime.vectorized': True,
-        'render.modes' : ['human', 'rgb_array']
-    }
-
-    def __init__(self, env_batch):
-        self.env_batch = env_batch
-
-    @property
-    def n(self):
-        return np.sum([env.n for env in self.env_batch])
-
-    @property
-    def action_space(self):
-        return self.env_batch[0].action_space
-
-    @property
-    def observation_space(self):
-        return self.env_batch[0].observation_space
-
-    def _step(self, action_n, time):
-        obs_n = []
-        reward_n = []
-        done_n = []
-        info_n = {'n': []}
-        i = 0
-        for env in self.env_batch:
-            obs, reward, done, _ = env.step(action_n[i:(i+env.n)], time)
-            i += env.n
-            obs_n += obs
-            # reward = [r / len(self.env_batch) for r in reward]
-            reward_n += reward
-            done_n += done
-        return obs_n, reward_n, done_n, info_n
-
-    def _reset(self):
-        obs_n = []
-        for env in self.env_batch:
-            obs_n += env.reset()
-        return obs_n
-
-    # render environment
-    def _render(self, mode='human', close=True):
-        results_n = []
-        for env in self.env_batch:
-            results_n += env.render(mode, close)
-        return results_n
+# class BatchMultiAgentEnv(gym.Env):
+#     metadata = {
+#         'runtime.vectorized': True,
+#         'render.modes' : ['human', 'rgb_array']
+#     }
+#
+#     def __init__(self, env_batch):
+#         self.env_batch = env_batch
+#
+#     @property
+#     def n(self):
+#         return np.sum([env.n for env in self.env_batch])
+#
+#     @property
+#     def action_space(self):
+#         return self.env_batch[0].action_space
+#
+#     @property
+#     def observation_space(self):
+#         return self.env_batch[0].observation_space
+#
+#     def _step(self, action_n, time):
+#         obs_n = []
+#         reward_n = []
+#         done_n = []
+#         info_n = {'n': []}
+#         i = 0
+#         for env in self.env_batch:
+#             obs, reward, done, _ = env.step(action_n[i:(i+env.n)], time)
+#             i += env.n
+#             obs_n += obs
+#             # reward = [r / len(self.env_batch) for r in reward]
+#             reward_n += reward
+#             done_n += done
+#         return obs_n, reward_n, done_n, info_n
+#
+#     def _reset(self):
+#         obs_n = []
+#         for env in self.env_batch:
+#             obs_n += env.reset()
+#         return obs_n
+#
+#     # render environment
+#     def _render(self, mode='human', close=True):
+#         results_n = []
+#         for env in self.env_batch:
+#             results_n += env.render(mode, close)
+#         return results_n
