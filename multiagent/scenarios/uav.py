@@ -14,7 +14,7 @@ class Scenario(BaseScenario):
         world.dim_c = 2
         world.treasure_colors = np.array(sns.color_palette(n_colors=2))
         num_good_agents = 0
-        num_uavs = 1
+        num_uavs = 2
         num_targets = num_uavs
         num_packages = 2
         # add agents
@@ -97,7 +97,7 @@ class Scenario(BaseScenario):
                 agent.color = np.array([0.70, 0.70, 0.70])
             # random properties for targets
             world.targets[0].color = np.array([0.25, 0.25, 0.25])
-            # world.targets[1].color = np.array([0.85, 0.45, 0.25])
+            world.targets[1].color = np.array([0.85, 0.45, 0.25])
 
             # set random initial states
             for i, agent in enumerate(world.agents):

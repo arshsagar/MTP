@@ -5,7 +5,6 @@ from torch import Tensor
 from torch.autograd import Variable
 from torch.optim import Adam
 from utils.misc import hard_update, gumbel_softmax, onehot_from_logits
-from utils.policies import DiscretePolicy
 from .networks import MLPNetwork
 from .misc import hard_update, gumbel_softmax, onehot_from_logits
 from .noise import OUNoise
